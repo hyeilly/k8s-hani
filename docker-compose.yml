@@ -1,0 +1,162 @@
+version: "3.9"
+
+services:
+  master:
+    container_name: master
+    image: ubuntu:22.04
+    command: sleep infinity
+    ports:
+      - "6443:6443" # Kubernetes API 서버 포트
+      - "2379:2379" # etcd 포트
+    networks:
+      k8s_net:
+        ipv4_address: 10.0.2.10
+    volumes:
+      - ./master:/var/lib/kubernetes # Kubernetes 데이터 저장소
+      - ./kubeconfig:/etc/kubernetes/admin.conf # Kubeconfig 파일
+    mem_limit: 512m
+    cpus: 1.0
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+
+    depends_on:
+      - etcd
+      - api-server
+      - controller-manager
+      - scheduler
+  api-server:
+    container_name: k8s-api-server
+    image: docker/desktop-kubernetes-apiserver:v1.30.2
+    command: kube-apiserver --advertise-address=10.0.2.10 --service-cluster-ip-range=10.96.0.0/12 --etcd-servers=http://etcd:2379 --insecure-bind-address=0.0.0.0
+    networks:
+      - k8s_net
+    depends_on:
+      - etcd
+    volumes:
+      - ./api-server-data:/var/lib/kubernetes # API 서버 데이터 저장소
+
+  # Etcd
+  etcd:
+    container_name: k8s-etcd
+    image: docker/desktop-kubernetes-etcd:3.5.12-0
+    command: etcd --listen-client-urls=http://0.0.0.0:2379 --advertise-client-urls=http://localhost:2379
+    networks:
+      - k8s_net
+    volumes:
+      - ./etcd-data:/etcd-data # Etcd 데이터 저장소
+
+  # Controller Manager
+  controller-manager:
+    container_name: k8s-controller-manager
+    image: docker/desktop-kubernetes-controller-manager:v1.30.2
+    command: kube-controller-manager --master=http://api-server:6443
+    networks:
+      - k8s_net
+    depends_on:
+      - api-server
+
+  # Scheduler
+  scheduler:
+    container_name: k8s-scheduler
+    image: docker/desktop-kubernetes-scheduler:v1.30.2
+    command: kube-scheduler --master=http://api-server:6443
+    networks:
+      - k8s_net
+    depends_on:
+      - api-server
+
+  worker1:
+    container_name: worker1
+    image: ubuntu:22.04
+    command: sleep infinity
+    networks:
+      k8s_net:
+        ipv4_address: 10.0.2.11
+    volumes:
+      - ./worker1:/var/lib/kubelet # Kubelet 데이터 저장소
+      - ./kubeconfig:/etc/kubernetes/kubeconfig # Kubeconfig 파일
+    mem_limit: 512m
+    cpus: 1.0
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+    depends_on:
+      - kubelet1
+      - kube-proxy1
+
+  # Kubelet on Worker 1
+  kubelet1:
+    container_name: k8s-kubelet1
+    image: psdn/kubelet:v1.27.2-1-g5077658
+    command: kubelet --kubeconfig=/etc/kubernetes/kubeconfig --api-servers=http://api-server:6443 --pod-infra-container-image=k8s.gcr.io/pause:3.9
+    networks:
+      - k8s_net
+    depends_on:
+      - api-server
+
+  # Kube-Proxy on Worker 1
+  kube-proxy1:
+    container_name: k8s-kube-proxy1
+    image: docker/desktop-kubernetes-proxy:v1.30.2
+    command: kube-proxy --master=http://api-server:6443
+    networks:
+      - k8s_net
+    depends_on:
+      - api-server
+
+  worker2:
+    container_name: worker2
+    image: ubuntu:22.04
+    command: sleep infinity
+    networks:
+      k8s_net:
+        ipv4_address: 10.0.2.12
+    volumes:
+      - ./worker2:/var/lib/kubelet # Kubelet 데이터 저장소
+      - ./kubeconfig:/etc/kubernetes/kubeconfig # Kubeconfig 파일
+    mem_limit: 512m
+    cpus: 1.0
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+  # Kubelet on Worker 2
+  kubelet2:
+    container_name: k8s-kubelet2
+    image: psdn/kubelet:v1.27.2-1-g5077658
+    command: kubelet --kubeconfig=/etc/kubernetes/kubeconfig --api-servers=http://api-server:6443 --pod-infra-container-image=k8s.gcr.io/pause:3.9
+    networks:
+      - k8s_net
+    depends_on:
+      - api-server
+
+  # Kube-Proxy on Worker 2
+  kube-proxy2:
+    container_name: k8s-kube-proxy2
+    image: docker/desktop-kubernetes-proxy:v1.30.2
+    command: kube-proxy --master=http://api-server:6443
+    networks:
+      - k8s_net
+    depends_on:
+      - api-server
+networks:
+  k8s_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.0.2.0/16
